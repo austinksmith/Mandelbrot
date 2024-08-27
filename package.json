@@ -41,10 +41,8 @@
   "bugs": {
     "url": "https://github.com/austinksmith/Hamsters.js/issues"
   },
-  "devDependencies": {
-
-  },
-  "directories": {
-
+  "directories": {},
+  "dependencies": {
+    "express": "^4.19.2"
   }
 }
