@@ -1,4 +1,4 @@
-# Hamsters.js Weather Simulation Demo
+# Hamsters.js Mandelbrot Set Visualization Demo
 
 * Setup Instructions
 1. Clone the repository
