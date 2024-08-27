@@ -1,0 +1,50 @@
+{
+  "name": "hamsters.js",
+  "author": "Austin K Smith",
+  "description": "A basic weather simulation making use of Hamsters.js",
+  "homepage": "http://www.hamsters.io/",
+  "version": "1.0.1",
+  "main": "build/hamsters.node.min.js",
+  "scripts": {
+    "start": "node app.js"
+  },
+  "license": "Artistic-2.0",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/austinksmith/Hamsters.js.git"
+  },
+  "keywords": [
+    "multithreading",
+    "multithreading library",
+    "multithreaded processing",
+    "concurrency",
+    "concurrent processing",
+    "parallel",
+    "parallel processing",
+    "parallelism",
+    "worker",
+    "web worker",
+    "worker threads",
+    "threads",
+    "threading",
+    "task running",
+    "mpi",
+    "message passing interface",
+    "hpc",
+    "high performance computing",
+    "serverless",
+    "serverless compute",
+    "serverless computing",
+    "multiprocess",
+    "cluster"
+  ],
+  "bugs": {
+    "url": "https://github.com/austinksmith/Hamsters.js/issues"
+  },
+  "devDependencies": {
+
+  },
+  "directories": {
+
+  }
+}
