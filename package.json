@@ -1,7 +1,7 @@
 {
   "name": "hamsters.js",
   "author": "Austin K Smith",
-  "description": "A basic weather simulation making use of Hamsters.js",
+  "description": "A mandelbrot simulation making use of Hamsters.js",
   "homepage": "http://www.hamsters.io/",
   "version": "1.0.1",
   "main": "build/hamsters.node.min.js",

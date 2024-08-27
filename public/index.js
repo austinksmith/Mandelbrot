@@ -1,378 +1,187 @@
-// Initialize global variables
-let grid;
-let simulationTime = 0; // Track time
-let fpsSum = 0; // Sum of FPS values for averaging
-let frameCount = 0; // Count of frames to calculate average FPS
-let startTime; // Time when the simulation starts
-let isSimulationRunning = false; // To track simulation state
-let params; // Parameters for Hamsters.js
+let width = 800;
+let height = 800;
+let maxIterations = 100;
+let mandelbrotSetBuffer;
+let zoomLevels = [
+  { xMin: -2.75, xMax: 1.75, yMin: -1.75, yMax: 1.75 }, // Level 0
+  { xMin: -2.5, xMax: 1.5, yMin: -1.5, yMax: 1.5 },     // Level 1
+  { xMin: -2.25, xMax: 1.25, yMin: -1.25, yMax: 1.25 }, // Level 2
+  { xMin: -2.0, xMax: 1.0, yMin: -1.0, yMax: 1.0 },     // Level 3
+  { xMin: -1.75, xMax: 0.75, yMin: -0.75, yMax: 0.75 }, // Level 4
+  { xMin: -1.5, xMax: 0.5, yMin: -0.5, yMax: 0.5 },     // Level 5
+  { xMin: -1.25, xMax: 0.25, yMin: -0.25, yMax: 0.25 }, // Level 6
+  { xMin: -1.0, xMax: 0.0, yMin: -0.5, yMax: 0.5 },     // Level 7
+  { xMin: -0.75, xMax: -0.25, yMin: -0.75, yMax: 0.75 }, // Level 8
+  { xMin: -0.5, xMax: 0.5, yMin: -0.5, yMax: 0.5 },     // Level 9
+];
 
-// Weather condition mapping
-const weatherConditions = {
-  'sunny': 0,
-  'cloudy': 1,
-  'rainy': 2,
-  'stormy': 3,
-  'foggy': 4,
-  'snowy': 5
-};
+let currentZoom = 0;
+let renderTimes = [];
+let totalTime = 0;
+let isRendering = false;
+let params = {}; // Initialize params object
+let maxThreads = 1;
+let mandelbrotSet;
 
-//Settings
-const cols = 128;
-const rows = 72;
-const cellSize = 10;
-const maxTime = 1000; // Run the simulation for 1000 frames
-const dampingFactor = 0.90; // Adjusted to control transition rates
+const mandelbrotOperator = function () {
+  const sharedArray = params.sharedArray;
+  const maxIterations = params.maxIterations;
+  const width = params.width;
+  const height = params.height;
+  const xMin = params.xMin;
+  const xMax = params.xMax;
+  const yMin = params.yMin;
+  const yMax = params.yMax;
 
-// Define transition probabilities
-const transitionProbs = {
-  'sunny': { cloudy: 0.10, rainy: 0.08, stormy: 0.05, foggy: 0.03, snowy: 0.02 },
-  'cloudy': { sunny: 0.07, rainy: 0.12, stormy: 0.07, foggy: 0.03, snowy: 0.02 },
-  'rainy': { sunny: 0.05, cloudy: 0.07, stormy: 0.15, foggy: 0.05, snowy: 0.03 },
-  'stormy': { sunny: 0.04, cloudy: 0.08, rainy: 0.08, foggy: 0.20, snowy: 0.04 },
-  'foggy': { sunny: 0.04, cloudy: 0.07, rainy: 0.04, stormy: 0.15, snowy: 0.12 },
-  'snowy': { sunny: 0.06, cloudy: 0.06, rainy: 0.05, stormy: 0.04, foggy: 0.12 }
-};
+  const map = (value, low1, high1, low2, high2) => low2 + (high2 - low2) * (value - low1) / (high1 - low1);
 
-
-// Hamsters.js operator function with randomization and debugging
-const operator = function() {
-  const sharedArray = params.sharedArray; // Use shared array directly
-  const cols = params.cols;
-  const rows = params.rows;
-  const weatherConditions = params.weatherConditions;
-  const dampingFactor = params.dampingFactor;
-  const transitionProbs = params.transitionProbs;
-
-  // Define a function to get neighbors
-  function getNeighbors(x, y) {
-    let neighbors = [];
-    for (let i = -1; i <= 1; i++) {
-      for (let j = -1; j <= 1; j++) {
-        if (i !== 0 || j !== 0) { // Skip the current cell
-          let ni = (x + i + cols) % cols; // Wrap around edges horizontally
-          let nj = (y + j + rows) % rows; // Wrap around edges vertically
-          neighbors.push(Atomics.load(sharedArray, ni + nj * cols));
-        }
-      }
-    }
-    return neighbors;
-  }
-
-  // Determine the range of indices for this thread
   const start = params.index.start || 0;
   const end = params.index.end;
 
   for (let index = start; index <= end; index++) {
-    const i = index % cols;
-    const j = Math.floor(index / cols);
-    const currentState = Atomics.load(sharedArray, index); // Load the value atomically
+    const x = index % width;
+    const y = Math.floor(index / width);
 
-    // Get the states of neighboring cells
-    const neighbors = getNeighbors(i, j);
-    const neighborSum = neighbors.reduce((sum, n) => sum + n, 0);
-    const neighborAverage = neighborSum / neighbors.length;
+    let a = map(x, 0, width, xMin, xMax);
+    let b = map(y, 0, height, yMin, yMax);
+    let n = 0;
+    let z = 0;
+    let zi = 0;
 
-    // Apply transition logic with damping factor and randomization
-    let newState = currentState; // Default to current state
+    while (n < maxIterations) {
+      let aa = z * z - zi * zi + a;
+      let bb = 2 * z * zi + b;
+      z = aa;
+      zi = bb;
 
-    // Transition logic based on probabilities
-    if (currentState === weatherConditions['sunny']) {
-      if (Math.random() < (transitionProbs['sunny']['cloudy'] + Math.random() * 0.05) * dampingFactor) {
-        newState = weatherConditions['cloudy'];
-      } else if (Math.random() < (transitionProbs['sunny']['rainy'] + Math.random() * 0.05) * dampingFactor) {
-        newState = weatherConditions['rainy'];
-      } else if (Math.random() < (transitionProbs['sunny']['stormy'] + Math.random() * 0.05) * dampingFactor) {
-        newState = weatherConditions['stormy'];
-      } else if (Math.random() < (transitionProbs['sunny']['foggy'] + Math.random() * 0.05) * dampingFactor) {
-        newState = weatherConditions['foggy'];
-      } else if (Math.random() < (transitionProbs['sunny']['snowy'] + Math.random() * 0.05) * dampingFactor) {
-        newState = weatherConditions['snowy'];
+      if (Math.abs(z + zi) > 16) {
+        break;
       }
-    } else if (currentState === weatherConditions['cloudy']) {
-      if (Math.random() < (transitionProbs['cloudy']['sunny'] + Math.random() * 0.05) * dampingFactor) {
-        newState = weatherConditions['sunny'];
-      } else if (Math.random() < (transitionProbs['cloudy']['rainy'] + Math.random() * 0.05) * dampingFactor) {
-        newState = weatherConditions['rainy'];
-      } else if (Math.random() < (transitionProbs['cloudy']['stormy'] + Math.random() * 0.05) * dampingFactor) {
-        newState = weatherConditions['stormy'];
-      } else if (Math.random() < (transitionProbs['cloudy']['foggy'] + Math.random() * 0.05) * dampingFactor) {
-        newState = weatherConditions['foggy'];
-      } else if (Math.random() < (transitionProbs['cloudy']['snowy'] + Math.random() * 0.05) * dampingFactor) {
-        newState = weatherConditions['snowy'];
-      }
-    } else if (currentState === weatherConditions['rainy']) {
-      if (Math.random() < (transitionProbs['rainy']['sunny'] + Math.random() * 0.05) * dampingFactor) {
-        newState = weatherConditions['sunny'];
-      } else if (Math.random() < (transitionProbs['rainy']['cloudy'] + Math.random() * 0.05) * dampingFactor) {
-        newState = weatherConditions['cloudy'];
-      } else if (Math.random() < (transitionProbs['rainy']['stormy'] + Math.random() * 0.05) * dampingFactor) {
-        newState = weatherConditions['stormy'];
-      } else if (Math.random() < (transitionProbs['rainy']['foggy'] + Math.random() * 0.05) * dampingFactor) {
-        newState = weatherConditions['foggy'];
-      } else if (Math.random() < (transitionProbs['rainy']['snowy'] + Math.random() * 0.05) * dampingFactor) {
-        newState = weatherConditions['snowy'];
-      }
-    } else if (currentState === weatherConditions['stormy']) {
-      if (Math.random() < (transitionProbs['stormy']['sunny'] + Math.random() * 0.05) * dampingFactor) {
-        newState = weatherConditions['sunny'];
-      } else if (Math.random() < (transitionProbs['stormy']['cloudy'] + Math.random() * 0.05) * dampingFactor) {
-        newState = weatherConditions['cloudy'];
-      } else if (Math.random() < (transitionProbs['stormy']['rainy'] + Math.random() * 0.05) * dampingFactor) {
-        newState = weatherConditions['rainy'];
-      } else if (Math.random() < (transitionProbs['stormy']['foggy'] + Math.random() * 0.05) * dampingFactor) {
-        newState = weatherConditions['foggy'];
-      } else if (Math.random() < (transitionProbs['stormy']['snowy'] + Math.random() * 0.05) * dampingFactor) {
-        newState = weatherConditions['snowy'];
-      }
-    } else if (currentState === weatherConditions['foggy']) {
-      if (Math.random() < (transitionProbs['foggy']['sunny'] + Math.random() * 0.05) * dampingFactor) {
-        newState = weatherConditions['sunny'];
-      } else if (Math.random() < (transitionProbs['foggy']['cloudy'] + Math.random() * 0.05) * dampingFactor) {
-        newState = weatherConditions['cloudy'];
-      } else if (Math.random() < (transitionProbs['foggy']['rainy'] + Math.random() * 0.05) * dampingFactor) {
-        newState = weatherConditions['rainy'];
-      } else if (Math.random() < (transitionProbs['foggy']['stormy'] + Math.random() * 0.05) * dampingFactor) {
-        newState = weatherConditions['stormy'];
-      } else if (Math.random() < (transitionProbs['foggy']['snowy'] + Math.random() * 0.05) * dampingFactor) {
-        newState = weatherConditions['snowy'];
-      }
-    } else if (currentState === weatherConditions['snowy']) {
-      if (Math.random() < (transitionProbs['snowy']['sunny'] + Math.random() * 0.05) * dampingFactor) {
-        newState = weatherConditions['sunny'];
-      } else if (Math.random() < (transitionProbs['snowy']['cloudy'] + Math.random() * 0.05) * dampingFactor) {
-        newState = weatherConditions['cloudy'];
-      } else if (Math.random() < (transitionProbs['snowy']['rainy'] + Math.random() * 0.05) * dampingFactor) {
-        newState = weatherConditions['rainy'];
-      } else if (Math.random() < (transitionProbs['snowy']['stormy'] + Math.random() * 0.05) * dampingFactor) {
-        newState = weatherConditions['stormy'];
-      } else if (Math.random() < (transitionProbs['snowy']['foggy'] + Math.random() * 0.05) * dampingFactor) {
-        newState = weatherConditions['foggy'];
-      }
+      n++;
     }
 
-    Atomics.store(sharedArray, index, newState); // Store the result atomically
+    Atomics.store(sharedArray, index, n);
   }
 };
 
-
-
-
-
-// Initialize and start Hamsters.js
-function initializeParams() {
-  // Create the SharedArrayBuffer and initialize grid
-  const buffer = new SharedArrayBuffer(cols * rows * Uint8Array.BYTES_PER_ELEMENT);
-  grid = new Uint8Array(buffer);
-
-  // Get the selected starting weather condition from dropdown
-  const startingWeather = parseInt(document.getElementById('startingWeather').value, 10);
-
-  // Initialize grid with the selected starting weather condition
-  for (let i = 0; i < grid.length; i++) {
-    grid[i] = startingWeather;
-  }
-
-  // Get the selected number of threads from dropdown
-  const threadCount = parseInt(document.getElementById('threadCount').value, 10);
-
-  // Initialize params with the grid and other settings
-  params = {
-    sharedArray: grid, // Pass the SharedArrayBuffer directly
-    cols: cols,
-    rows: rows,
-    weatherConditions: weatherConditions,
-    dampingFactor: dampingFactor,
-    dataType: 'Uint8',
-    threads: threadCount, // Use selected number of threads
-    transitionProbs: transitionProbs 
-  };
-}
-
-function startSimulation() {
-  if (isSimulationRunning) return;
-
-  // Reset simulation state
-  resetSimulation();
-
-  initializeParams();
-
-  // Record the start time
-  startTime = performance.now();
-  isSimulationRunning = true;
-  frameRate(60); // Set frame rate to control the speed of the simulation
-  loop(); // Ensure draw loop is active
-}
-
-function stopSimulation() {
-  if (!isSimulationRunning) return;
-
-  // Logic to stop the simulation
-  isSimulationRunning = false;
-  noLoop(); // Stop the draw loop
-  // Note: Hamsters.js handles stopping by managing the threads internally
-}
-
-function resetSimulation() {
-  // Reset the global variables
-  simulationTime = 0;
-  fpsSum = 0;
-  frameCount = 0;
-  grid = new Uint8Array(cols * rows); // Reset the grid
-  
-  // Get the selected starting weather condition from dropdown
-  const startingWeather = parseInt(document.getElementById('startingWeather').value, 10);
-
-  // Initialize grid with the selected starting weather condition
-  for (let i = 0; i < grid.length; i++) {
-    grid[i] = startingWeather;
-  }
-}
-
 function setup() {
-  createCanvas(1280, 720); // Set canvas size to 400x400
-  pixelDensity(1); // Ensure pixel density is 1 for consistency
-}
-
-async function draw() {
-  if (!isSimulationRunning) return;
-
-  // Read user input for dynamic parameters
-  const weatherChangeRate = parseFloat(document.getElementById('weatherChange').value);
-
-  // Refresh the params object with the latest grid values
-  params.sharedArray = grid;
-  // Run Hamsters.js to update the grid for this frame
-  grid = await hamsters.promise(params, operator);
-
-  background(220);
-  displayGrid(grid);
+  createCanvas(width, height);
+  mandelbrotSetBuffer = new SharedArrayBuffer(width * height * Uint32Array.BYTES_PER_ELEMENT);
+  mandelbrotSet = new Uint32Array(mandelbrotSetBuffer);
   
-  // Calculate and accumulate FPS
-  const currentFPS = frameRate();
-  fpsSum += currentFPS;
-  frameCount++;
+  initializeMandelbrotParams();
+  
+  // Set up event listeners
+  document.getElementById('startButton').addEventListener('click', startSimulation);
+  document.getElementById('stopButton').addEventListener('click', stopSimulation);
+  document.getElementById('iterations').addEventListener('change', updateIterations);
+  document.getElementById('threadCount').addEventListener('change', updateThreads);
 
-  // Display the FPS counter in white
-  fill(255, 255, 255); // White color
-  textSize(16);
-  text(`FPS: ${Math.round(currentFPS)}`, 10, 20);
+  populateThreadDropdown(); // Populate dropdown with thread options
 
-  // Update stats
-  updateStats();
-
-  // Stop the simulation after a certain time
-  simulationTime++;
-  if (simulationTime > maxTime) {
-    stopSimulation(); // Stops the draw loop
-    displayResults(grid);
-  }
+  // Start simulation by default or on button click
+  // startSimulation(); // Uncomment if you want to start on page load
 }
 
-function updateStats() {
-  const elapsedTime = performance.now() - startTime;
-  const averageFPS = frameCount > 0 ? fpsSum / frameCount : 0;
-
-  // Display stats
-  document.getElementById('stats').innerHTML = `
-    <p>Average FPS: ${Math.round(averageFPS)}</p>
-    <p>Total Frames: ${simulationTime}</p>
-    <p>Total Elapsed Time: ${elapsedTime.toFixed(2)} ms</p>
-  `;
-}
-
-function displayGrid(resp) {
-  for (let i = 0; i < cols; i++) {
-    for (let j = 0; j < rows; j++) {
-      let index = i + j * cols;
-      let state = Atomics.load(resp, index); // Use atomic load
-      if (state === weatherConditions['sunny']) {
-        fill(255, 255, 0); // Yellow for sunny
-      } else if (state === weatherConditions['cloudy']) {
-        fill(200, 200, 200); // Gray for cloudy
-      } else if (state === weatherConditions['rainy']) {
-        fill(0, 0, 255); // Blue for rainy
-      } else if (state === weatherConditions['stormy']) {
-        fill(100, 100, 100); // Dark gray for stormy
-      } else if (state === weatherConditions['foggy']) {
-        fill(200, 200, 255, 150); // Light blue for foggy
-      } else if (state === weatherConditions['snowy']) {
-        fill(255, 255, 255); // White for snowy
-      }
-      rect(i * cellSize, j * cellSize, cellSize, cellSize);
-    }
-  }
-}
-
-function displayResults(resp) {
-  // Count the occurrences of each weather condition
-  let counts = {
-    'sunny': 0,
-    'cloudy': 0,
-    'rainy': 0,
-    'stormy': 0,
-    'foggy': 0,
-    'snowy': 0
+function initializeMandelbrotParams() {
+  params = {
+    sharedArray: new Uint32Array(mandelbrotSetBuffer),
+    maxIterations: maxIterations,
+    width: width,
+    height: height,
+    dataType: 'Uint32',
+    threads: parseInt(document.getElementById('threadCount').value, 10) || 1 // Number of threads
   };
-
-  for (let i = 0; i < cols; i++) {
-    for (let j = 0; j < rows; j++) {
-      let index = i + j * cols;
-      let state = Atomics.load(resp, index); // Use atomic load
-      if (state === weatherConditions['sunny']) counts['sunny']++;
-      else if (state === weatherConditions['cloudy']) counts['cloudy']++;
-      else if (state === weatherConditions['rainy']) counts['rainy']++;
-      else if (state === weatherConditions['stormy']) counts['stormy']++;
-      else if (state === weatherConditions['foggy']) counts['foggy']++;
-      else if (state === weatherConditions['snowy']) counts['snowy']++;
-    }
-  }
-
-  // Determine the most common weather condition
-  let mostCommon = '';
-  let maxCount = 0;
-  for (let condition in counts) {
-    if (counts[condition] > maxCount) {
-      mostCommon = condition;
-      maxCount = counts[condition];
-    }
-  }
-
-  // Display results including average FPS
-  const averageFPS = frameCount > 0 ? fpsSum / frameCount : 0;
-  document.getElementById('results').innerHTML = `
-    <p>Simulation Results:</p>
-    <p>Sunny: ${counts['sunny']}</p>
-    <p>Cloudy: ${counts['cloudy']}</p>
-    <p>Rainy: ${counts['rainy']}</p>
-    <p>Stormy: ${counts['stormy']}</p>
-    <p>Foggy: ${counts['foggy']}</p>
-    <p>Snowy: ${counts['snowy']}</p>
-    <p>Most Common Weather: ${mostCommon}</p>
-    <p>Average FPS: ${Math.round(averageFPS)}</p>
-  `;
 }
 
-// Populate the dropdown with thread options
 function populateThreadDropdown() {
-  const dropdown = document.getElementById('threadCount');
-  const maxThreads = hamsters.maxThreads;
+  const threadCountSelect = document.getElementById('threadCount');
+  maxThreads = hamsters.maxThreads; // Get the maximum number of threads available
+
+  // Create dropdown options for thread counts
   for (let i = 1; i <= maxThreads; i++) {
     const option = document.createElement('option');
     option.value = i;
-    option.text = `Thread ${i}`;
-    dropdown.add(option);
+    option.text = i;
+    threadCountSelect.add(option);
   }
 }
 
-// Initialize the thread dropdown
-populateThreadDropdown();
+function updateIterations() {
+  maxIterations = parseInt(document.getElementById('iterations').value, 10);
+  initializeMandelbrotParams(); // Reinitialize parameters with new maxIterations
+}
 
-// Example functions to control simulation
-document.getElementById('startButton').addEventListener('click', function() {
-  startSimulation();
-});
+function updateThreads() {
+  params.threads = parseInt(document.getElementById('threadCount').value, 10);
+  initializeMandelbrotParams(); // Reinitialize parameters with new thread count
+}
 
-document.getElementById('stopButton').addEventListener('click', function() {
-  stopSimulation();
-});
+function resetCanvas() {
+  clear(); // Clear the canvas
+  currentZoom = 0; // Reset zoom level
+  renderTimes = []; // Clear previous render times
+  totalTime = 0; // Reset total time
+}
+
+function startSimulation() {
+  if (!isRendering) {
+    resetCanvas();
+    isRendering = true;
+    renderNextZoom(mandelbrotSet);
+  }
+}
+
+function stopSimulation() {
+  noLoop();
+  isRendering = false;
+}
+
+function renderNextZoom(mandelbrotSet) {
+  if (currentZoom < zoomLevels.length && isRendering) {
+    params.sharedArray = mandelbrotSet;
+    params.xMin = zoomLevels[currentZoom].xMin;
+    params.xMax = zoomLevels[currentZoom].xMax;
+    params.yMin = zoomLevels[currentZoom].yMin;
+    params.yMax = zoomLevels[currentZoom].yMax;
+
+    const startTime = performance.now();
+
+    hamsters.promise(params, mandelbrotOperator).then((newMandelbrotSet) => {
+      if (!isRendering) return; // Exit if rendering was stopped
+
+      const endTime = performance.now();
+      const renderTime = endTime - startTime;
+
+      renderTimes.push(renderTime);
+      totalTime += renderTime;
+      const averageTime = totalTime / renderTimes.length;
+
+      document.getElementById('frameInfo').innerText = `Frame: ${currentZoom + 1}/10`;
+      document.getElementById('renderTime').innerText = `Average Rendering Time: ${averageTime.toFixed(2)} ms`;
+
+      drawMandelbrot(newMandelbrotSet);
+      currentZoom++;
+      setTimeout(() => renderNextZoom(newMandelbrotSet), 4); // Wait for 4ms before rendering the next zoom level
+    });
+  } else {
+    stopSimulation();
+  }
+}
+
+function drawMandelbrot(mandelbrotSet) {
+  loadPixels();
+  for (let index = 0; index < width * height; index++) {
+    let n = mandelbrotSet[index];
+    let x = index % width;
+    let y = Math.floor(index / width);
+    let brightness = map(n, 0, maxIterations, 0, 255);
+
+    let pixelIndex = (x + y * width) * 4;
+    pixels[pixelIndex] = brightness;        // Red
+    pixels[pixelIndex + 1] = brightness;    // Green
+    pixels[pixelIndex + 2] = brightness;    // Blue
+    pixels[pixelIndex + 3] = 255;           // Alpha
+  }
+  updatePixels();
+}
